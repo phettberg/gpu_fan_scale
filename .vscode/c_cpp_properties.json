@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "ARM Cortex M",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${TIVAWARE}"
+            ],
+            "defines": [
+                "PART_TM4C123GH6PM"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
