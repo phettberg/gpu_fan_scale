@@ -30,6 +30,7 @@ __error__(char *pcFilename, uint32_t ui32Line)
 
 static char g_cInput[APP_INPUT_BUF_SIZE];
 uint8_t g_dutyCycle = 15;
+uint32_t g_tachoFrequency = 50;
 uint32_t g_timerValue = 0;
 uint32_t g_risingEdge = 0;
 uint32_t g_risingEdgeSecond = 0;
@@ -82,6 +83,16 @@ void ConfigurePWM(void) {
 
     PWMOutputState(PWM0_BASE, PWM_OUT_0_BIT, true);
     PWMGenEnable(PWM0_BASE, PWM_GEN_0);
+
+    GPIOPinConfigure(GPIO_PB4_M0PWM2);
+    GPIOPinTypePWM(GPIO_PORTB_BASE, GPIO_PIN_4);
+
+    PWMGenConfigure(PWM0_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN | PWM_GEN_MODE_NO_SYNC);
+    PWMGenPeriodSet(PWM0_BASE, PWM_GEN_1, (SysCtlClockGet() / 32 / g_tachoFrequency));
+    PWMPulseWidthSet(PWM0_BASE, PWM_OUT_2, (SysCtlClockGet() / 32 / g_tachoFrequency * 50 / 100));
+
+    PWMGenEnable(PWM0_BASE, PWM_GEN_1);
+    PWMOutputState(PWM0_BASE, PWM_OUT_2_BIT, true);
 }
 
 
@@ -160,10 +171,15 @@ int main(void) {
     while(1) {
         UARTprintf("> ");
         UARTgets(g_cInput,sizeof(g_cInput));
-        g_dutyCycle = ustrtoul(g_cInput, 0, 10);
+        // g_dutyCycle = ustrtoul(g_cInput, 0, 10);
+        g_tachoFrequency = ustrtoul(g_cInput, 0, 10);
 
         PWMPulseWidthSet(PWM0_BASE, PWM_OUT_0, (SysCtlClockGet() / 32 / PWM_FREQUENCY * g_dutyCycle / 100));
-        UARTprintf("Duty Cycle: %d%%\n", g_dutyCycle);
+        PWMGenPeriodSet(PWM0_BASE, PWM_GEN_1, (SysCtlClockGet() / 32 / g_tachoFrequency));
+        PWMPulseWidthSet(PWM0_BASE, PWM_OUT_2, (SysCtlClockGet() / 32 / g_tachoFrequency * 50 / 100));
+
+        // UARTprintf("Duty Cycle: %d%%\n", g_dutyCycle);
+        UARTprintf("Tacho Frequency: %d%%\n", g_tachoFrequency);
 
         //
         // Set the GPIO high.
