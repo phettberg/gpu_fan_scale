@@ -1,0 +1,1 @@
+# gpu_fan_scale
