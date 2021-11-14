@@ -31,12 +31,6 @@ __error__(char *pcFilename, uint32_t ui32Line)
 static char g_cInput[APP_INPUT_BUF_SIZE];
 uint8_t g_dutyCycle = 15;
 uint32_t g_tachoFrequency = 50;
-uint32_t g_timerValue = 0;
-uint32_t g_risingEdge = 0;
-uint32_t g_risingEdgeSecond = 0;
-uint32_t g_fallingEdge = 0;
-uint32_t g_edgeDifference = 0;
-uint32_t g_periodClocks = 0;
 
 
 void ConfigureUART(void) {
@@ -107,9 +101,6 @@ void ConfigureTimer(void) {
 
     IntMasterEnable();
 
-    TimerClockSourceSet(TIMER0_BASE, TIMER_CLOCK_SYSTEM);
-    TimerPrescaleSet(TIMER0_BASE, TIMER_B, 255);
-
     TimerConfigure(TIMER0_BASE, TIMER_CFG_B_CAP_TIME_UP | TIMER_CFG_SPLIT_PAIR);
     TimerControlEvent(TIMER0_BASE, TIMER_B, TIMER_EVENT_BOTH_EDGES);
 
@@ -117,18 +108,40 @@ void ConfigureTimer(void) {
     TimerIntEnable(TIMER0_BASE, TIMER_CAPB_EVENT);
 
     TimerEnable(TIMER0_BASE, TIMER_B);
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER2);
+
+    GPIOPinTypeTimer(GPIO_PORTF_BASE, GPIO_PIN_4);
+    GPIOPinConfigure(GPIO_PF4_T2CCP0);
+
+    TimerConfigure(TIMER2_BASE, TIMER_CFG_A_CAP_TIME_UP | TIMER_CFG_SPLIT_PAIR);
+    TimerControlEvent(TIMER2_BASE, TIMER_A, TIMER_EVENT_POS_EDGE);
+
+    IntEnable(INT_TIMER2A);
+    TimerIntEnable(TIMER2_BASE, TIMER_CAPA_EVENT);
+
+    TimerEnable(TIMER2_BASE, TIMER_A);
 }
 
 
+/* Measuring pulse width and period of incoming PWM signal */
+
+uint32_t g_edgeDifference = 0;
+uint32_t g_periodClocks = 0;
+
 void Timer0BIntHandler(void) {
+    static uint32_t risingEdge = 0;
+    static uint32_t risingEdgeSecond = 0;
+    static uint32_t fallingEdge = 0;
+
     if (GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_1)) {
-        g_risingEdge = TimerValueGet(TIMER0_BASE, TIMER_B);
-        if (g_risingEdgeSecond) {
-            g_periodClocks = g_risingEdge - g_risingEdgeSecond;
-            g_risingEdgeSecond = 0;
+        risingEdge = TimerValueGet(TIMER0_BASE, TIMER_B);
+        if (risingEdgeSecond) {
+            g_periodClocks = risingEdge - risingEdgeSecond;
+            risingEdgeSecond = 0;
         }
         else {
-            g_risingEdgeSecond = g_risingEdge;
+            risingEdgeSecond = risingEdge;
         }
 
     }
@@ -136,11 +149,34 @@ void Timer0BIntHandler(void) {
     TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
 
     if (!GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_1)) {
-        g_fallingEdge = TimerValueGet(TIMER0_BASE, TIMER_B);
-        g_edgeDifference = g_fallingEdge - g_risingEdge;
+        fallingEdge = TimerValueGet(TIMER0_BASE, TIMER_B);
+        g_edgeDifference = fallingEdge - risingEdge;
 
     }
-    // TimerEnable(TIMER0_BASE, TIMER_B);
+}
+
+
+/* Measuring period of incoming tacho signal */
+
+uint32_t g_tachoPeriodClocks = 0;
+
+void Timer2AIntHandler(void) {
+    static uint32_t risingEdge = 0;
+    static uint32_t risingEdgeSecond = 0;
+
+    if (GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_4)) {
+        risingEdge = TimerValueGet(TIMER2_BASE, TIMER_A);
+        if (risingEdgeSecond) {
+            g_tachoPeriodClocks = risingEdge - risingEdgeSecond;
+            risingEdgeSecond = 0;
+        }
+        else {
+            risingEdgeSecond = risingEdge;
+        }
+
+    }
+
+    TimerIntClear(TIMER2_BASE, TIMER_CAPA_EVENT);
 }
 
 
@@ -166,7 +202,7 @@ int main(void) {
 
     uint32_t timePeriod = 0;
     uint32_t pulseWidth = 0;
-    uint32_t dutyCycle = 0;
+    uint32_t tachoPeriod = 0;
 
     while(1) {
         UARTprintf("> ");
@@ -179,7 +215,7 @@ int main(void) {
         PWMPulseWidthSet(PWM0_BASE, PWM_OUT_2, (SysCtlClockGet() / 32 / g_tachoFrequency * 50 / 100));
 
         // UARTprintf("Duty Cycle: %d%%\n", g_dutyCycle);
-        UARTprintf("Tacho Frequency: %d%%\n", g_tachoFrequency);
+        UARTprintf("Tacho Frequency: %dHz\n", g_tachoFrequency);
 
         //
         // Set the GPIO high.
@@ -203,7 +239,8 @@ int main(void) {
 
         timePeriod = g_periodClocks * 62.5 / 1000;
         pulseWidth = g_edgeDifference * 62.5 / 1000;
-        // dutyCycle = pulseWidth * 100.0 / timePeriod;
-        UARTprintf("W: %d P: %d DC: %d\n", pulseWidth, timePeriod, dutyCycle);
+        tachoPeriod = g_tachoPeriodClocks * 62.5 / 1000;
+        UARTprintf("W: %d P: %d\n", pulseWidth, timePeriod);
+        UARTprintf("TP: %d\n", tachoPeriod);
     }
 }
