@@ -14,6 +14,11 @@ ROOT=${TIVAWARE}
 include ${ROOT}/makedefs
 
 #
+# Where to find source files that do not live in this directory.
+#
+VPATH=${TIVAWARE}/utils
+
+#
 # Where to find header files that do not live in the source directory.
 #
 IPATH=${TIVAWARE}
@@ -41,6 +46,8 @@ ${COMPILER}:
 #
 ${COMPILER}/gpu_fan_control.axf: ${COMPILER}/gpu_fan_control.o
 ${COMPILER}/gpu_fan_control.axf: ${COMPILER}/startup_${COMPILER}.o
+${COMPILER}/gpu_fan_control.axf: ${COMPILER}/uartstdio.o
+${COMPILER}/gpu_fan_control.axf: ${COMPILER}/ustdlib.o
 ${COMPILER}/gpu_fan_control.axf: ${ROOT}/driverlib/${COMPILER}/libdriver.a
 ${COMPILER}/gpu_fan_control.axf: gpu_fan_control.ld
 SCATTERgcc_gpu_fan_control=gpu_fan_control.ld
