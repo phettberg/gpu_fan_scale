@@ -264,6 +264,8 @@ uint16_t calcRPMfromDC(uint16_t dc) {
 }
 
 
+#define MEAN(name, val, count) (((uint32_t)(name)*(count-1)+(uint32_t)(val))/count)
+
 typedef enum {
     STANDARD = 0, SILENT, FALLBACK
 } state_t;
@@ -278,7 +280,7 @@ void app(void) {
 
     static state_t state = STANDARD;
 
-    measuredDCfromGPU = getGPUDutyCycle();
+    measuredDCfromGPU = MEAN(measuredDCfromGPU, getGPUDutyCycle(), 128);
     measuredTachofromFan = getFanTachoRPM();
     calculatedTachoFromGPU = calcRPMfromDC(measuredDCfromGPU);
     tachoDeviation = calculatedTachoFromGPU - measuredTachofromFan;
