@@ -264,6 +264,10 @@ uint16_t calcRPMfromDC(uint16_t dc) {
 }
 
 
+typedef enum {
+    STANDARD = 0, SILENT, FALLBACK
+} state_t;
+
 void app(void) {
     /* Duty Cycle is in ‰ */
 
@@ -272,31 +276,47 @@ void app(void) {
     static uint32_t calculatedTachoFromGPU = 0;
     int32_t tachoDeviation = 0;
 
+    static state_t state = STANDARD;
+
     measuredDCfromGPU = getGPUDutyCycle();
     measuredTachofromFan = getFanTachoRPM();
     calculatedTachoFromGPU = calcRPMfromDC(measuredDCfromGPU);
     tachoDeviation = calculatedTachoFromGPU - measuredTachofromFan;
 
-    if (measuredTachofromFan < 500) {
-        setFanDutyCycle(1000);
-        return;
-    }
-
-    if (measuredDCfromGPU < 350) {
-        setFanDutyCycle(150);
-    }
-    else {
-        setFanDutyCycle(measuredDCfromGPU);
-        if (tachoDeviation > 500) {
-            setFanDutyCycle(1000);
-        }
-
+    switch(state) {
+        case STANDARD:
+            setFanDutyCycle(measuredDCfromGPU);
+            if (tachoDeviation > 500) {
+                state = FALLBACK;
+            }
+            else if (measuredDCfromGPU < 330) {
+                state = SILENT;
+            }
+            break;
+        case SILENT:
+            setFanDutyCycle(150);
+            if (measuredTachofromFan < 500 && measuredTachofromFan != 0) {  // measurement not reliable yet
+                state = FALLBACK;
+            }
+            else if (measuredDCfromGPU > 400) {
+                state = STANDARD;
+            }
+            break;
+        case FALLBACK:
+        default:
+            if (tachoDeviation < 100 && measuredTachofromFan > 600) {
+                state = STANDARD;
+            }
+            else {
+                setFanDutyCycle(900);
+            }
+            break;
     }
 
     setGPUTachoRPM(calculatedTachoFromGPU);
 
     SysCtlDelay(266666);
-    UARTprintf("%d‰ %drpm %drpm %d\n", measuredDCfromGPU, measuredTachofromFan, calculatedTachoFromGPU, tachoDeviation);
+    UARTprintf("%d: %d‰ %drpm %drpm %d\n", state, measuredDCfromGPU, measuredTachofromFan, calculatedTachoFromGPU, tachoDeviation);
 }
 
 
