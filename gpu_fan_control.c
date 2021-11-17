@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include "inc/hw_memmap.h"
 #include "inc/hw_ints.h"
 #include "driverlib/debug.h"
@@ -26,7 +27,7 @@ __error__(char *pcFilename, uint32_t ui32Line)
 #endif
 
 #define APP_INPUT_BUF_SIZE 128
-#define PWM_FREQUENCY 25000
+#define PWM_FREQUENCY 27000
 #define PWM_DIVIDER 1
 
 static char g_cInput[APP_INPUT_BUF_SIZE];
@@ -158,6 +159,8 @@ void Timer2AIntHandler(void) {
     static uint32_t risingEdge = 0;
     static uint32_t risingEdgeSecond = 0;
 
+    TimerIntClear(TIMER2_BASE, TIMER_CAPA_EVENT);
+
     if (GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_4)) {
         risingEdge = TimerValueGet(TIMER2_BASE, TIMER_A);
         if (risingEdgeSecond) {
@@ -167,10 +170,7 @@ void Timer2AIntHandler(void) {
         else {
             risingEdgeSecond = risingEdge;
         }
-
     }
-
-    TimerIntClear(TIMER2_BASE, TIMER_CAPA_EVENT);
 }
 
 
@@ -210,14 +210,14 @@ void development(void) {
 
     UARTprintf("> ");
     UARTgets(g_cInput,sizeof(g_cInput));
-    dutyCycle = ustrtoul(g_cInput, 0, 10);
-    // tachoRPM = ustrtoul(g_cInput, 0, 10);
+    // dutyCycle = ustrtoul(g_cInput, 0, 10);
+    tachoRPM = ustrtoul(g_cInput, 0, 10);
 
-    setFanDutyCycle(dutyCycle);
-    // setGPUTachoRPM(tachoRPM);
+    // setFanDutyCycle(dutyCycle);
+    setGPUTachoRPM(tachoRPM);
 
-    UARTprintf("Duty Cycle: %d%%\n", dutyCycle);
-    // UARTprintf("Set tacho: %drpm\n", tachoRPM);
+    // UARTprintf("Duty Cycle: %d%%\n", dutyCycle);
+    UARTprintf("Set tacho: %drpm\n", tachoRPM);
 
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, GPIO_PIN_3);
 
@@ -235,25 +235,72 @@ void development(void) {
 }
 
 
+const uint16_t DCtoRPMlookup[13][2] = {
+    {282, 1480},
+    {290, 1530},
+    {330, 1700},
+    {376, 1870},
+    {420, 2040},
+    {469, 2210},
+    {517, 2380},
+    {573, 2550},
+    {634, 2725},
+    {695, 2890},
+    {761, 3060},
+    {829, 3240},
+    {910, 3400}
+};
+
+uint16_t calcRPMfromDC(uint16_t dc) {
+    uint8_t i=0;
+
+    if (dc < DCtoRPMlookup[0][0]) return 1300;
+    if (dc > DCtoRPMlookup[12][0]) return 3450;
+
+    for (i=0; i<12; i++) {
+        if (dc <= DCtoRPMlookup[i+1][0]) break;
+    }
+    return DCtoRPMlookup[i][1] + (dc - DCtoRPMlookup[i][0]) *
+        (DCtoRPMlookup[i+1][1] - DCtoRPMlookup[i][1]) / (DCtoRPMlookup[i+1][0] - DCtoRPMlookup[i][0]);
+}
+
+
 void app(void) {
     /* Duty Cycle is in ‰ */
 
-    if (getFanTachoRPM() < 500) {
+    static uint32_t measuredDCfromGPU = 0;
+    static uint32_t controlledDCtoFan = 0;
+    static uint32_t measuredTachofromFan = 0;
+    static uint32_t controlledTachoToGPU = 0;
+    static uint32_t calculatedTachoFromGPU = 0;
+    uint32_t tachoDeviation = 0;
+
+
+    measuredDCfromGPU = getGPUDutyCycle();
+    measuredTachofromFan = getFanTachoRPM();
+    calculatedTachoFromGPU = calcRPMfromDC(measuredDCfromGPU);
+    tachoDeviation = abs(calculatedTachoFromGPU - measuredTachofromFan);
+
+    if (measuredTachofromFan < 500) {
         setFanDutyCycle(1000);
         return;
     }
 
-    if (getGPUDutyCycle() < 350) {
-        setFanDutyCycle(140);
-        setGPUTachoRPM(1700);
+    if (measuredDCfromGPU < 350) {
+        setFanDutyCycle(150);
     }
     else {
-        setFanDutyCycle(getGPUDutyCycle());
-        setGPUTachoRPM(getFanTachoRPM());
+        setFanDutyCycle(measuredDCfromGPU);
+        if (tachoDeviation > 500) {
+            setFanDutyCycle(1000);
+        }
+
     }
 
-    SysCtlDelay(26666);
-    UARTprintf("GPU DC:    %d ‰\nFAN TACHO: %d rpm\n", getGPUDutyCycle(), getFanTachoRPM());
+    setGPUTachoRPM(calculatedTachoFromGPU);
+
+    SysCtlDelay(266666);
+    UARTprintf("%d‰ %drpm %drpm %d\n", measuredDCfromGPU, measuredTachofromFan, calculatedTachoFromGPU, tachoDeviation);
 }
 
 
@@ -273,7 +320,7 @@ int main(void) {
     UARTprintf("PWM Control \n");
 
     while(1) {
-        development();
-        // app();
+        // development();
+        app();
     }
 }
