@@ -27,7 +27,7 @@ __error__(char *pcFilename, uint32_t ui32Line)
 
 #define APP_INPUT_BUF_SIZE 128
 #define PWM_FREQUENCY 25000
-#define PWM_DIVIDER 16
+#define PWM_DIVIDER 1
 
 static char g_cInput[APP_INPUT_BUF_SIZE];
 static uint8_t g_dutyCycle = 15;
@@ -50,7 +50,7 @@ void ConfigureUART(void) {
 
 
 void ConfigurePWM(void) {
-    SysCtlPWMClockSet(SYSCTL_PWMDIV_16);
+    SysCtlPWMClockSet(SYSCTL_PWMDIV_1);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM0);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
@@ -65,15 +65,31 @@ void ConfigurePWM(void) {
     PWMOutputState(PWM0_BASE, PWM_OUT_6_BIT, true);
     PWMGenEnable(PWM0_BASE, PWM_GEN_3);
 
-    GPIOPinConfigure(GPIO_PB4_M0PWM2);
-    GPIOPinTypePWM(GPIO_PORTB_BASE, GPIO_PIN_4);
+    // GPIOPinConfigure(GPIO_PB4_M0PWM2);
+    // GPIOPinTypePWM(GPIO_PORTB_BASE, GPIO_PIN_4);
 
-    PWMGenConfigure(PWM0_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN | PWM_GEN_MODE_NO_SYNC);
-    PWMGenPeriodSet(PWM0_BASE, PWM_GEN_1, (SysCtlClockGet() / PWM_DIVIDER / g_tachoFrequency));
-    PWMPulseWidthSet(PWM0_BASE, PWM_OUT_2, (SysCtlClockGet() / PWM_DIVIDER / g_tachoFrequency * 50 / 100));
+    // PWMGenConfigure(PWM0_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN | PWM_GEN_MODE_NO_SYNC);
+    // PWMGenPeriodSet(PWM0_BASE, PWM_GEN_1, (SysCtlClockGet() / PWM_DIVIDER / g_tachoFrequency));
+    // PWMPulseWidthSet(PWM0_BASE, PWM_OUT_2, (SysCtlClockGet() / PWM_DIVIDER / g_tachoFrequency * 50 / 100));
 
-    PWMGenEnable(PWM0_BASE, PWM_GEN_1);
-    PWMOutputState(PWM0_BASE, PWM_OUT_2_BIT, true);
+    // PWMGenEnable(PWM0_BASE, PWM_GEN_1);
+    // PWMOutputState(PWM0_BASE, PWM_OUT_2_BIT, true);
+}
+
+
+void configureTimerPWM(void) {
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
+
+    GPIOPinConfigure(GPIO_PC5_WT0CCP1);
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_5);
+
+    TimerConfigure(WTIMER0_BASE, TIMER_CFG_SPLIT_PAIR | TIMER_CFG_B_PWM);
+
+    TimerLoadSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / 25);
+    TimerMatchSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / 25 / 2);
+
+    TimerEnable(WTIMER0_BASE, TIMER_B);
 }
 
 
@@ -188,10 +204,10 @@ uint32_t getFanTachoRPM(void) {
 
 void setGPUTachoRPM(uint32_t rpm) {
     /* A tacho signal emits two pulses per full rotation */
-    PWMGenPeriodSet(PWM0_BASE, PWM_GEN_1, (SysCtlClockGet() / PWM_DIVIDER / (rpm * 2.0 / 60)));
+    TimerLoadSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / (rpm * 2.0 / 60) - 1);
 
     /* Keep duty cycle at 50% */
-    PWMPulseWidthSet(PWM0_BASE, PWM_OUT_2, (SysCtlClockGet() / PWM_DIVIDER / (rpm * 2.0 / 60) * 50 / 100));
+    TimerMatchSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / ((rpm * 2.0 / 60) - 1) * 50 / 100);
 }
 
 
@@ -260,13 +276,14 @@ int main(void) {
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_3);
 
     ConfigureUART();
+    configureTimerPWM();
     ConfigurePWM();
     ConfigureTimer();
 
     UARTprintf("PWM Control \n");
 
     while(1) {
-        // development();
-        app();
+        development();
+        // app();
     }
 }
