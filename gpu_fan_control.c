@@ -1,6 +1,5 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include "inc/hw_memmap.h"
 #include "inc/hw_ints.h"
 #include "driverlib/debug.h"
@@ -269,17 +268,14 @@ void app(void) {
     /* Duty Cycle is in ‰ */
 
     static uint32_t measuredDCfromGPU = 0;
-    static uint32_t controlledDCtoFan = 0;
     static uint32_t measuredTachofromFan = 0;
-    static uint32_t controlledTachoToGPU = 0;
     static uint32_t calculatedTachoFromGPU = 0;
-    uint32_t tachoDeviation = 0;
-
+    int32_t tachoDeviation = 0;
 
     measuredDCfromGPU = getGPUDutyCycle();
     measuredTachofromFan = getFanTachoRPM();
     calculatedTachoFromGPU = calcRPMfromDC(measuredDCfromGPU);
-    tachoDeviation = abs(calculatedTachoFromGPU - measuredTachofromFan);
+    tachoDeviation = calculatedTachoFromGPU - measuredTachofromFan;
 
     if (measuredTachofromFan < 500) {
         setFanDutyCycle(1000);
