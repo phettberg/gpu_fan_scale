@@ -49,7 +49,7 @@ void ConfigureUART(void) {
 }
 
 
-void ConfigurePWM(void) {
+void ConfigurePWMFan(void) {
     SysCtlPWMClockSet(SYSCTL_PWMDIV_1);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM0);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
@@ -64,20 +64,10 @@ void ConfigurePWM(void) {
 
     PWMOutputState(PWM0_BASE, PWM_OUT_6_BIT, true);
     PWMGenEnable(PWM0_BASE, PWM_GEN_3);
-
-    // GPIOPinConfigure(GPIO_PB4_M0PWM2);
-    // GPIOPinTypePWM(GPIO_PORTB_BASE, GPIO_PIN_4);
-
-    // PWMGenConfigure(PWM0_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN | PWM_GEN_MODE_NO_SYNC);
-    // PWMGenPeriodSet(PWM0_BASE, PWM_GEN_1, (SysCtlClockGet() / PWM_DIVIDER / g_tachoFrequency));
-    // PWMPulseWidthSet(PWM0_BASE, PWM_OUT_2, (SysCtlClockGet() / PWM_DIVIDER / g_tachoFrequency * 50 / 100));
-
-    // PWMGenEnable(PWM0_BASE, PWM_GEN_1);
-    // PWMOutputState(PWM0_BASE, PWM_OUT_2_BIT, true);
 }
 
 
-void configureTimerPWM(void) {
+void configureTimerPWMTacho(void) {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
 
@@ -93,7 +83,7 @@ void configureTimerPWM(void) {
 }
 
 
-void ConfigureTimer(void) {
+void ConfigureTimerMeasurements(void) {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
@@ -276,9 +266,9 @@ int main(void) {
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_3);
 
     ConfigureUART();
-    configureTimerPWM();
-    ConfigurePWM();
-    ConfigureTimer();
+    ConfigurePWMFan();
+    configureTimerPWMTacho();
+    ConfigureTimerMeasurements();
 
     UARTprintf("PWM Control \n");
 
