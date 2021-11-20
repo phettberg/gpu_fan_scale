@@ -1,7 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "inc/hw_memmap.h"
-// #include "driverlib/pin_map.h"
 #include "driverlib/gpio.h"
 #include "driverlib/sysctl.h"
 #include "utils/ustdlib.h"
@@ -37,7 +36,7 @@ void DevelopmentPWM(void) {
 }
 
 
-void developmentTacho(void) {
+void DevelopmentTacho(void) {
     uint32_t tachoRPM = 0;
 
     UARTprintf("> ");
@@ -161,11 +160,10 @@ void App(void) {
 
 
 int main(void) {
+    /* 40MHz clock using PLL */
     SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_XTAL_16MHZ | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN);
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
-    SysCtlDelay(1);
-
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_3);
 
     ConfigureUART();
@@ -178,7 +176,7 @@ int main(void) {
 
     while(1) {
         // DevelopmentPWM();
-        // developmentTacho();
+        // DevelopmentTacho();
         App();
     }
 }
