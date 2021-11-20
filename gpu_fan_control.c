@@ -29,9 +29,10 @@ __error__(char *pcFilename, uint32_t ui32Line)
 #define PWM_FREQUENCY 27000
 #define PWM_DIVIDER 1
 
+#define TACHO_FREQUENCY_INIT 25
+#define PWM_DUTY_CYCLE_INIT 15
+
 static char g_cInput[APP_INPUT_BUF_SIZE];
-static uint8_t g_dutyCycle = 15;
-static uint32_t g_tachoFrequency = 50;
 
 
 void ConfigureUART(void) {
@@ -60,7 +61,7 @@ void ConfigurePWMFan(void) {
 
     PWMGenConfigure(PWM0_BASE, PWM_GEN_3, PWM_GEN_MODE_DOWN | PWM_GEN_MODE_NO_SYNC);
     PWMGenPeriodSet(PWM0_BASE, PWM_GEN_3, (SysCtlClockGet() / PWM_DIVIDER / PWM_FREQUENCY));
-    PWMPulseWidthSet(PWM0_BASE, PWM_OUT_6, (SysCtlClockGet() / PWM_DIVIDER / PWM_FREQUENCY * g_dutyCycle / 100));
+    PWMPulseWidthSet(PWM0_BASE, PWM_OUT_6, (SysCtlClockGet() / PWM_DIVIDER / PWM_FREQUENCY * PWM_DUTY_CYCLE_INIT / 100));
 
     PWMOutputState(PWM0_BASE, PWM_OUT_6_BIT, true);
     PWMGenEnable(PWM0_BASE, PWM_GEN_3);
@@ -76,8 +77,8 @@ void configureTimerPWMTacho(void) {
 
     TimerConfigure(WTIMER0_BASE, TIMER_CFG_SPLIT_PAIR | TIMER_CFG_B_PWM);
 
-    TimerLoadSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / 25);
-    TimerMatchSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / 25 / 2);
+    TimerLoadSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / TACHO_FREQUENCY_INIT);
+    TimerMatchSet(WTIMER0_BASE, TIMER_B, SysCtlClockGet() / TACHO_FREQUENCY_INIT / 2);
 
     TimerEnable(WTIMER0_BASE, TIMER_B);
 }
@@ -123,29 +124,27 @@ uint32_t g_edgeDifference = 0;
 uint32_t g_periodClocks = 0;
 volatile uint32_t g_dutyCycleAct = 0;
 
+static uint32_t previousPeriod = 0;
+static uint32_t previousPulsewidth = 0;
+
 void Timer0BIntHandler(void) {
-    static uint32_t risingEdge = 0;
-    static uint32_t risingEdgeSecond = 0;
-    static uint32_t fallingEdge = 0;
+    static uint32_t startTime = 0;
+    static uint32_t stopTime = 0;
+    uint32_t captureRegister = 0;
+
 
     TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
 
+    captureRegister = TimerValueGet(TIMER0_BASE, TIMER_B);
+
     if (GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_1)) {
-        risingEdge = TimerValueGet(TIMER0_BASE, TIMER_B);
-        if (risingEdgeSecond) {
-            g_periodClocks = risingEdge - risingEdgeSecond;
-            risingEdgeSecond = 0;
-            g_dutyCycleAct = (uint32_t)(g_edgeDifference * 1000.0 / g_periodClocks);
-        }
-        else {
-            risingEdgeSecond = risingEdge;
-        }
+        previousPeriod = (captureRegister - startTime) & 0xFFFFFF;
+        previousPulsewidth = (stopTime - startTime) & 0xFFFFFF;
+        startTime = captureRegister;
+        g_dutyCycleAct = previousPulsewidth * 1000.0 / previousPeriod;
     }
-
-    else if (!GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_1)) {
-        fallingEdge = TimerValueGet(TIMER0_BASE, TIMER_B);
-        g_edgeDifference = (fallingEdge - risingEdge)&0xFFFF;
-
+    else {
+        stopTime = captureRegister;
     }
 }
 
@@ -155,25 +154,22 @@ void Timer0BIntHandler(void) {
 uint32_t g_tachoPeriodClocks = 0;
 
 void Timer2AIntHandler(void) {
-    static uint32_t risingEdge = 0;
-    static uint32_t risingEdgeSecond = 0;
+    static uint32_t startTime = 0;
+    uint32_t captureRegister = 0;
 
     TimerIntClear(TIMER2_BASE, TIMER_CAPA_EVENT);
 
+    captureRegister = TimerValueGet(TIMER2_BASE, TIMER_A);
+
     if (GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_4)) {
-        risingEdge = TimerValueGet(TIMER2_BASE, TIMER_A);
-        if (risingEdgeSecond) {
-            g_tachoPeriodClocks = risingEdge - risingEdgeSecond;
-            risingEdgeSecond = 0;
-        }
-        else {
-            risingEdgeSecond = risingEdge;
-        }
+        g_tachoPeriodClocks = (captureRegister - startTime) & 0xFFFFFF;
+        startTime = captureRegister;
     }
 }
 
 
 uint32_t getGPUDutyCycle(void ) {
+    if (g_dutyCycleAct < 35 || g_dutyCycleAct > 950) return 950;
     return g_dutyCycleAct;
 }
 
@@ -187,7 +183,9 @@ uint32_t getFanTachoRPM(void) {
     /* The system clock is 1 / 16MHz or 62.5ns
      * A tacho signal emits two pulses per full rotation
      */
-    return (uint32_t)(1e9 / (62.5 * g_tachoPeriodClocks) * 60 / 2);
+    uint32_t rpm = (1e9 / (25.0 * g_tachoPeriodClocks) * 60 / 2);
+    if (rpm > 3800) return 500;
+    return rpm;
 }
 
 
@@ -200,37 +198,54 @@ void setGPUTachoRPM(uint32_t rpm) {
 }
 
 
-void development(void) {
-    uint32_t timePeriod = 0;
-    uint32_t pulseWidth = 0;
-    uint32_t tachoPeriod = 0;
-    uint32_t tachoRPM = 0;
+void development_pwm(void) {
     uint32_t dutyCycle = 0;
 
     UARTprintf("> ");
     UARTgets(g_cInput,sizeof(g_cInput));
-    // dutyCycle = ustrtoul(g_cInput, 0, 10);
+    dutyCycle = ustrtoul(g_cInput, 0, 10);
+
+    setFanDutyCycle(dutyCycle);
+
+    UARTprintf("SysClk: %d\n", SysCtlClockGet());
+    UARTprintf("Duty Cycle: %d%%\n", dutyCycle);
+
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, GPIO_PIN_3);
+    SysCtlDelay(100000);
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0);
+    SysCtlDelay(100000);
+
+    for (uint8_t i=0; i<20; i++) {
+        UARTprintf("W: %d P: %d DC: %d Tacho: %d\n", previousPulsewidth, previousPeriod, getGPUDutyCycle(), getFanTachoRPM());
+        SysCtlDelay(26666);
+    }
+    UARTprintf("--------------------------");
+}
+
+
+void development_tacho(void) {
+    uint32_t tachoRPM = 0;
+
+    UARTprintf("> ");
+    UARTgets(g_cInput,sizeof(g_cInput));
+
     tachoRPM = ustrtoul(g_cInput, 0, 10);
 
-    // setFanDutyCycle(dutyCycle);
     setGPUTachoRPM(tachoRPM);
 
-    // UARTprintf("Duty Cycle: %d%%\n", dutyCycle);
+    UARTprintf("SysClk: %d\n", SysCtlClockGet());
     UARTprintf("Set tacho: %drpm\n", tachoRPM);
 
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, GPIO_PIN_3);
-
-    SysCtlDelay(1000000);
-
+    SysCtlDelay(1000);
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0);
+    SysCtlDelay(1000);
 
-    SysCtlDelay(1000000);
-
-    timePeriod = g_periodClocks;// * 62.5;
-    pulseWidth = g_edgeDifference;// * 62.5;
-    tachoPeriod = g_tachoPeriodClocks * 62.5 / 1000;
-    UARTprintf("W: %d P: %d DC: %d\n", pulseWidth, timePeriod, getGPUDutyCycle());
-    UARTprintf("Clks: %d TP: %d RPM: %d\n", g_tachoPeriodClocks, tachoPeriod, getFanTachoRPM());
+    for (uint8_t i=0; i<50; i++) {
+        UARTprintf("Clks: %d  CR: RPM: %d\n", g_tachoPeriodClocks, getFanTachoRPM());
+        SysCtlDelay(266666);
+    }
+    UARTprintf("--------------------------");
 }
 
 
@@ -274,24 +289,28 @@ void app(void) {
     /* Duty Cycle is in ‰ */
 
     static uint32_t measuredDCfromGPU = 0;
+    static uint32_t measuredDCfromGPUmean = 0;
     static uint32_t measuredTachofromFan = 0;
     static uint32_t calculatedTachoFromGPU = 0;
     int32_t tachoDeviation = 0;
 
     static state_t state = STANDARD;
 
-    measuredDCfromGPU = MEAN(measuredDCfromGPU, getGPUDutyCycle(), 128);
+    measuredDCfromGPU = getGPUDutyCycle();
+    measuredDCfromGPUmean = MEAN(measuredDCfromGPUmean, measuredDCfromGPU, 8);
     measuredTachofromFan = getFanTachoRPM();
     calculatedTachoFromGPU = calcRPMfromDC(measuredDCfromGPU);
     tachoDeviation = calculatedTachoFromGPU - measuredTachofromFan;
 
+    UARTprintf("%d: ", state);
+
     switch(state) {
         case STANDARD:
-            setFanDutyCycle(measuredDCfromGPU);
-            if (tachoDeviation > 500) {
+            setFanDutyCycle(measuredDCfromGPUmean);
+            if (tachoDeviation > 500 && measuredTachofromFan != 0) {
                 state = FALLBACK;
             }
-            else if (measuredDCfromGPU < 330) {
+            else if (measuredDCfromGPU < 310) {
                 state = SILENT;
             }
             break;
@@ -300,7 +319,7 @@ void app(void) {
             if (measuredTachofromFan < 500 && measuredTachofromFan != 0) {  // measurement not reliable yet
                 state = FALLBACK;
             }
-            else if (measuredDCfromGPU > 400) {
+            else if (measuredDCfromGPU > 350) {
                 state = STANDARD;
             }
             break;
@@ -317,13 +336,14 @@ void app(void) {
 
     setGPUTachoRPM(calculatedTachoFromGPU);
 
-    SysCtlDelay(266666);
-    UARTprintf("%d: %d‰ %drpm %drpm %d\n", state, measuredDCfromGPU, measuredTachofromFan, calculatedTachoFromGPU, tachoDeviation);
+    SysCtlDelay(2666666);
+    UARTprintf("%d‰ %d‰ %drpm %drpm %d\n", measuredDCfromGPU, measuredDCfromGPUmean,
+        measuredTachofromFan, calculatedTachoFromGPU, tachoDeviation);
 }
 
 
 int main(void) {
-    SysCtlClockSet(SYSCTL_SYSDIV_1 | SYSCTL_XTAL_16MHZ | SYSCTL_USE_OSC | SYSCTL_OSC_MAIN);
+    SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_XTAL_16MHZ | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN);
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
     SysCtlDelay(1);
@@ -338,7 +358,8 @@ int main(void) {
     UARTprintf("PWM Control \n");
 
     while(1) {
-        // development();
+        // development_pwm();
+        // development_tacho();
         app();
     }
 }
