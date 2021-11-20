@@ -50,6 +50,37 @@ void ConfigureUART(void) {
 }
 
 
+void ConfigureTimerSysTick(void) {
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER3);
+
+    TimerConfigure(TIMER3_BASE, TIMER_CFG_PERIODIC);
+    TimerLoadSet(TIMER3_BASE, TIMER_A, SysCtlClockGet() / 1000 - 1);
+
+    IntEnable(INT_TIMER3A);
+    TimerIntEnable(TIMER3_BASE, TIMER_TIMA_TIMEOUT);
+
+    TimerEnable(TIMER3_BASE, TIMER_A);
+}
+
+
+volatile uint32_t g_millis = 0;
+
+void Timer3AIntHandler(void) {
+    uint32_t status = 0;
+
+    status = TimerIntStatus(TIMER3_BASE, true);
+    TimerIntClear(TIMER3_BASE, status);
+
+    g_millis++;
+}
+
+
+void delayMS(uint32_t millis) {
+    uint32_t startTime = g_millis;
+    while ((g_millis - startTime) < millis);
+}
+
+
 void ConfigurePWMFan(void) {
     SysCtlPWMClockSet(SYSCTL_PWMDIV_1);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM0);
@@ -68,7 +99,7 @@ void ConfigurePWMFan(void) {
 }
 
 
-void configureTimerPWMTacho(void) {
+void ConfigureTimerPWMTacho(void) {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
 
@@ -120,8 +151,6 @@ void ConfigureTimerMeasurements(void) {
 
 /* Measuring pulse width and period of incoming PWM signal */
 
-uint32_t g_edgeDifference = 0;
-uint32_t g_periodClocks = 0;
 volatile uint32_t g_dutyCycleAct = 0;
 
 static uint32_t previousPeriod = 0;
@@ -131,7 +160,6 @@ void Timer0BIntHandler(void) {
     static uint32_t startTime = 0;
     static uint32_t stopTime = 0;
     uint32_t captureRegister = 0;
-
 
     TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
 
@@ -180,11 +208,11 @@ void setFanDutyCycle(uint32_t dutyCycle) {
 
 
 uint32_t getFanTachoRPM(void) {
-    /* The system clock is 1 / 16MHz or 62.5ns
+    /* The system clock is 1 / 20MHz or 25ns
      * A tacho signal emits two pulses per full rotation
      */
     uint32_t rpm = (1e9 / (25.0 * g_tachoPeriodClocks) * 60 / 2);
-    if (rpm > 3800) return 500;
+    if (rpm < 500 || rpm > 3800) return 500;
     return rpm;
 }
 
@@ -216,7 +244,7 @@ void development_pwm(void) {
     SysCtlDelay(100000);
 
     for (uint8_t i=0; i<20; i++) {
-        UARTprintf("W: %d P: %d DC: %d Tacho: %d\n", previousPulsewidth, previousPeriod, getGPUDutyCycle(), getFanTachoRPM());
+        UARTprintf("W: %d P: %d DC: %d\n", previousPulsewidth, previousPeriod, getGPUDutyCycle());
         SysCtlDelay(26666);
     }
     UARTprintf("--------------------------");
@@ -288,6 +316,7 @@ typedef enum {
 void app(void) {
     /* Duty Cycle is in ‰ */
 
+    static uint8_t greenLED = GPIO_PIN_3;
     static uint32_t measuredDCfromGPU = 0;
     static uint32_t measuredDCfromGPUmean = 0;
     static uint32_t measuredTachofromFan = 0;
@@ -307,7 +336,7 @@ void app(void) {
     switch(state) {
         case STANDARD:
             setFanDutyCycle(measuredDCfromGPUmean);
-            if (tachoDeviation > 500 && measuredTachofromFan != 0) {
+            if (tachoDeviation > 500) {
                 state = FALLBACK;
             }
             else if (measuredDCfromGPU < 310) {
@@ -316,7 +345,7 @@ void app(void) {
             break;
         case SILENT:
             setFanDutyCycle(150);
-            if (measuredTachofromFan < 500 && measuredTachofromFan != 0) {  // measurement not reliable yet
+            if (measuredTachofromFan < 500) {
                 state = FALLBACK;
             }
             else if (measuredDCfromGPU > 350) {
@@ -336,9 +365,12 @@ void app(void) {
 
     setGPUTachoRPM(calculatedTachoFromGPU);
 
-    SysCtlDelay(2666666);
     UARTprintf("%d‰ %d‰ %drpm %drpm %d\n", measuredDCfromGPU, measuredDCfromGPUmean,
         measuredTachofromFan, calculatedTachoFromGPU, tachoDeviation);
+
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, greenLED ^= 0xFF);
+
+    delayMS(500);
 }
 
 
@@ -351,8 +383,9 @@ int main(void) {
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_3);
 
     ConfigureUART();
+    ConfigureTimerSysTick();
     ConfigurePWMFan();
-    configureTimerPWMTacho();
+    ConfigureTimerPWMTacho();
     ConfigureTimerMeasurements();
 
     UARTprintf("PWM Control \n");
