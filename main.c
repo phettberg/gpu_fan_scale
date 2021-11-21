@@ -95,18 +95,20 @@ uint16_t calcRPMfromDC(uint16_t dc) {
 #define MEAN(name, val, count) (((uint32_t)(name)*(count-1)+(uint32_t)(val))/count)
 
 typedef enum {
-    STANDARD = 0, SILENT, FALLBACK
+    STANDARD = 0, SILENT, RAMPUP, FALLBACK
 } state_t;
 
 void App(void) {
     /* Duty Cycle is in ‰ */
 
     static uint8_t greenLED = GPIO_PIN_3;
-    static uint32_t measuredDCfromGPU = 0;
+    static uint32_t rampupIterations = 0;
     static uint32_t measuredDCfromGPUmean = 0;
-    static uint32_t measuredTachofromFan = 0;
-    static uint32_t calculatedTachoFromGPU = 0;
+    uint32_t measuredDCfromGPU = 0;
+    uint32_t measuredTachofromFan = 0;
+    uint32_t calculatedTachoFromGPU = 0;
     int32_t tachoDeviation = 0;
+
 
     static state_t state = STANDARD;
 
@@ -124,7 +126,7 @@ void App(void) {
             if (tachoDeviation > 500) {
                 state = FALLBACK;
             }
-            else if (measuredDCfromGPU < 310) {
+            else if (measuredDCfromGPUmean < 310) {
                 state = SILENT;
             }
             break;
@@ -133,8 +135,20 @@ void App(void) {
             if (measuredTachofromFan < 500) {
                 state = FALLBACK;
             }
-            else if (measuredDCfromGPU > 350) {
+            else if (measuredDCfromGPUmean > 350) {
+                state = RAMPUP;
+            }
+            break;
+        case RAMPUP:
+            setFanDutyCycle(measuredDCfromGPUmean);
+            rampupIterations++;
+            if (tachoDeviation < 100) {
+                rampupIterations = 0;
                 state = STANDARD;
+            }
+            else if (rampupIterations >= 40) {
+                rampupIterations = 0;
+                state = FALLBACK;
             }
             break;
         case FALLBACK:

@@ -138,8 +138,8 @@ volatile uint32_t g_dutyCycleAct = 0;
 void Timer0BIntHandler(void) {
     static uint32_t startTime = 0;
     static uint32_t stopTime = 0;
-    static uint32_t previousPeriod = 0;
-    static uint32_t previousPulsewidth = 0;
+    uint32_t previousPeriod = 0;
+    uint32_t previousPulsewidth = 0;
     uint32_t captureRegister = 0;
 
     TimerIntClear(TIMER0_BASE, TIMER_CAPB_EVENT);
@@ -160,7 +160,7 @@ void Timer0BIntHandler(void) {
 
 /* Measuring period of incoming tacho signal */
 
-uint32_t g_tachoPeriodClocks = 0;
+volatile uint32_t g_tachoPeriodClocks = 0;
 
 void Timer2AIntHandler(void) {
     static uint32_t startTime = 0;
